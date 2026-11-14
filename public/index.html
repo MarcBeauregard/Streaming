@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>FeedSwitch</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230b0d10'/%3E%3Cpath d='M9 7v10l8-5z' fill='%234ade80'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand" aria-label="FeedSwitch">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <rect x="2.5" y="4.5" width="19" height="13" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M10 8.2v5.6l4.8-2.8z" fill="currentColor"/>
+        <path d="M8 20.5h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <span>FeedSwitch</span>
+    </div>
+    <form id="add-form" class="add-form" autocomplete="off">
+      <input id="add-url" type="text" inputmode="url" spellcheck="false"
+             placeholder="Colle le lien d’une page de streaming…" aria-label="Lien de la page de streaming">
+      <button type="submit" class="primary">Trouver les flux</button>
+    </form>
+  </header>
+
+  <main class="layout">
+    <section class="stage" aria-label="Lecteur">
+      <div class="screen">
+        <video id="video" controls playsinline></video>
+        <div id="overlay" class="overlay">
+          <p id="overlay-title" class="overlay-title">Aucun flux en lecture</p>
+          <p id="overlay-text" class="overlay-text">Colle le lien d’une page de streaming en haut. L’app ouvre la page en arrière-plan, repère les flux vidéo et les liste à droite.</p>
+          <button id="overlay-action" class="primary" hidden>Réessayer</button>
+        </div>
+      </div>
+      <div class="playbar">
+        <div class="now">
+          <span id="now-state" class="dot" aria-hidden="true"></span>
+          <div class="now-text">
+            <strong id="now-title">Rien en lecture</strong>
+            <span id="now-sub"></span>
+          </div>
+        </div>
+        <div class="controls">
+          <label class="quality">
+            <span>Qualité</span>
+            <select id="quality" disabled>
+              <option value="-1">Auto</option>
+            </select>
+          </label>
+          <button id="reload" type="button" disabled title="Recharger le flux (R)">Recharger</button>
+          <button id="pip" type="button" disabled title="Image dans l’image (P)">Image dans l’image</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="rail" aria-label="Pages et flux">
+      <div class="rail-head">
+        <h2>Flux</h2>
+        <span id="rail-hint" class="hint">Touches 1–9 pour changer de flux</span>
+      </div>
+      <div id="sources" class="sources"></div>
+    </aside>
+  </main>
+
+  <script src="/vendor/hls.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
