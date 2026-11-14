@@ -26,7 +26,7 @@ function sameSite(a, b) {
   }
 }
 
-export async function fetchUpstream(url, feed, { range, signal, timeoutMs = 20000 } = {}) {
+export async function fetchUpstream(url, feed, { range, signal, timeoutMs = 20000, redirect = 'follow' } = {}) {
   const headers = { accept: '*/*', 'user-agent': DEFAULT_UA, ...(feed?.headers || {}) };
   // Cookies and credentials were captured for the playlist host; do not leak
   // them to an unrelated host (segments are often served from a CDN).
@@ -43,7 +43,7 @@ export async function fetchUpstream(url, feed, { range, signal, timeoutMs = 2000
   try {
     return await fetch(url, {
       headers,
-      redirect: 'follow',
+      redirect,
       signal: signal ? AbortSignal.any([signal, ctrl.signal]) : ctrl.signal,
     });
   } finally {

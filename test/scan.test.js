@@ -24,7 +24,7 @@ test('finds the stream behind an ad overlay, a pop-up and an iframe', { skip, ti
   assert.equal(result.title, 'Match test, lien 1');
   assert.equal(result.finalUrl, fixture.pageUrl, 'the ad redirect must not move the page');
   assert.ok(fixture.stats.popups >= 1, 'the fixture did open its pop-up');
-  assert.deepEqual(result.links.map((l) => l.text), ['Lien 2 HD', 'Server 3']);
+  assert.deepEqual(result.links.map((l) => l.text), ['Lien 2 HD', 'Server 3', 'Lien 4 DASH']);
 
   const feeds = await buildFeeds(result.candidates);
   assert.equal(feeds.length, 1, 'variant playlists are folded into their master');
@@ -53,4 +53,17 @@ test('finds a stream that is only mentioned in the page source', { skip, timeout
 test('reports nothing for a page without a stream', { skip, timeout: 90000 }, async () => {
   const result = await scanPage(`${fixture.pageUrl}?link=3`, { timeoutMs: 5000 });
   assert.deepEqual(await buildFeeds(result.candidates), []);
+});
+
+test('finds a DASH stream and keeps the address it redirects to', { skip, timeout: 90000 }, async () => {
+  const result = await scanPage(`${fixture.pageUrl}?link=4`);
+  const feeds = await buildFeeds(result.candidates);
+  assert.equal(feeds.length, 1, 'segments and the redirecting address are not feeds');
+  const [feed] = feeds;
+  assert.equal(feed.kind, 'dash');
+  assert.equal(feed.url, `${fixture.cdnOrigin}/dash/manifest.mpd`);
+  assert.equal(feed.status, 'ok');
+  assert.equal(feed.playable, true);
+  assert.equal(feed.live, false);
+  assert.deepEqual(feed.qualities.map((q) => q.label), ['720p', '480p', '240p']);
 });

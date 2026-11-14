@@ -112,14 +112,14 @@ function totalSize(headers) {
 const TEXT_TYPES = /(html|json|javascript|text\/plain|xml)/i;
 const MAX_TEXT_BODY = 2 * 1024 * 1024;
 
-// Finds playlist URLs written in page source, scripts and API responses.
+// Finds HLS and DASH manifest URLs written in page source, scripts and API responses.
 export function findPlaylistUrls(text) {
   const clean = text
     .replace(/\\\//g, '/')
     .replace(/\\u0026/gi, '&')
     .replace(/&amp;/g, '&');
   const found = new Set();
-  const re = /https?:\/\/[^\s"'<>\\)]+?\.m3u8(?:\?[^\s"'<>\\)]*)?/gi;
+  const re = /https?:\/\/[^\s"'<>\\)]+?\.(?:m3u8|mpd)(?![\w.-])(?:\?[^\s"'<>\\)]*)?/gi;
   let m;
   while ((m = re.exec(clean))) found.add(m[0]);
   return [...found];
@@ -263,6 +263,12 @@ export async function scanPage(url, { timeoutMs = 30000, settleMs = 4000, onProg
     if (!/^https?:/i.test(resUrl)) return;
     const headers = response.headers();
     const type = headers['content-type'] || '';
+    // A manifest address that only redirects: the address it leads to is
+    // requested next and is the one worth keeping.
+    if (response.status() >= 300 && response.status() < 400) {
+      if (candidates.get(resUrl)?.via === 'network') candidates.delete(resUrl);
+      return;
+    }
     const kind = kindFromContentType(type, resUrl) || (kindFromUrl(resUrl) === 'file' && response.ok() ? 'file' : null);
 
     if (kind) {
@@ -299,7 +305,7 @@ export async function scanPage(url, { timeoutMs = 30000, settleMs = 4000, onProg
       } catch {}
       add({
         url: found,
-        kind: 'hls',
+        kind: kindFromUrl(found) || 'hls',
         via: 'text',
         headers: pickHeaders({ 'user-agent': userAgent, referer: frameUrl, origin }),
         frameUrl,

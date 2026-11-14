@@ -1,4 +1,4 @@
-/* global Hls */
+/* global Hls, dashjs */
 (() => {
   const $ = (id) => document.getElementById(id);
   const video = $('video');
@@ -25,6 +25,8 @@
     autoplay: false, // start the next feed found, if nothing is playing
   };
   let hls = null;
+  let dash = null;
+  let dashLoading = null;
   let recoveries = 0;
 
   // ------------------------------------------------------------ helpers
@@ -92,7 +94,6 @@
 
   function feedMeta(feed) {
     if (feed.status === 'error') return `Trouvé, mais illisible : ${feed.error}`;
-    if (feed.kind === 'dash') return feed.error;
     if (feed.kind === 'file') {
       return feed.size ? `Fichier vidéo · ${Math.round(feed.size / 1048576)} Mo` : 'Fichier vidéo';
     }
@@ -141,10 +142,88 @@
     qualitySelect.disabled = hls.levels.length < 2;
   }
 
+  // The DASH player is large and rarely needed: fetch it on first use.
+  function loadDashLibrary() {
+    if (window.dashjs) return Promise.resolve();
+    if (!dashLoading) {
+      dashLoading = new Promise((resolve, reject) => {
+        const script = h('script', { src: '/vendor/dash.min.js' });
+        script.onload = resolve;
+        script.onerror = () => {
+          dashLoading = null;
+          reject(new Error('Lecteur DASH introuvable'));
+        };
+        document.head.append(script);
+      });
+    }
+    return dashLoading;
+  }
+
+  function dashLevels() {
+    const levels = dash.getRepresentationsByType('video') || [];
+    return [...levels].sort((a, b) => (b.height || 0) - (a.height || 0) || b.bandwidth - a.bandwidth);
+  }
+
+  function dashLevelLabel(level) {
+    return levelLabel({ height: level.height, frameRate: level.frameRate, bitrate: level.bandwidth });
+  }
+
+  function fillDashQuality() {
+    const levels = dashLevels();
+    qualitySelect.replaceChildren(
+      h('option', { value: '-1' }, 'Auto'),
+      ...levels.map((level) => h('option', { value: level.id }, dashLevelLabel(level))),
+    );
+    qualitySelect.disabled = levels.length < 2;
+  }
+
+  // dash.js error codes after which the stream cannot continue: manifest or
+  // segment unreachable or unreadable, no playable track, unsupported codec.
+  const DASH_FATAL_CODES = [10, 11, 23, 25, 27, 28, 31, 32, 34, 35];
+
+  // Shows which quality "Auto" is currently on, as the HLS player does.
+  function showDashAutoLevel(level) {
+    const auto = qualitySelect.options[0];
+    const manual = qualitySelect.value !== '-1';
+    auto.textContent = !manual && level && qualitySelect.options.length > 2 ? `Auto (${dashLevelLabel(level)})` : 'Auto';
+  }
+
+  function playDash(feed) {
+    const events = dashjs.MediaPlayer.events;
+    dash = dashjs.MediaPlayer().create();
+    dash.updateSettings({ streaming: { buffer: { fastSwitchEnabled: true } } });
+    dash.on(events.STREAM_INITIALIZED, fillDashQuality);
+    dash.on(events.QUALITY_CHANGE_RENDERED, (event) => {
+      if (event.mediaType === 'video') showDashAutoLevel(event.newRepresentation);
+    });
+    dash.on(events.ERROR, (event) => {
+      const code = event.error && event.error.code;
+      // Other codes (subtitles, clock sync, buffer trimming) do not stop playback.
+      const fatal = DASH_FATAL_CODES.includes(code) || (code >= 100 && code < 200);
+      if (!fatal) return;
+      stopPlayer();
+      fail(code >= 100 ? 'Ce flux est protégé.' : 'Lecture impossible.');
+    });
+    dash.on(events.PLAYBACK_NOT_ALLOWED, () => {
+      // Autoplay with sound was refused: start muted rather than not at all.
+      video.muted = true;
+      dash.play();
+    });
+    dash.on(events.PLAYBACK_ERROR, () => {
+      stopPlayer();
+      fail('Lecture impossible.');
+    });
+    dash.initialize(video, feed.playUrl, true);
+  }
+
   function stopPlayer() {
     if (hls) {
       hls.destroy();
       hls = null;
+    }
+    if (dash) {
+      dash.destroy();
+      dash = null;
     }
     video.removeAttribute('src');
     video.load();
@@ -212,6 +291,14 @@
       });
       hls.loadSource(feed.playUrl);
       hls.attachMedia(video);
+    } else if (feed.kind === 'dash') {
+      loadDashLibrary().then(
+        () => {
+          // The user may have switched feed while the player was loading.
+          if (state.current && state.current.feedId === feed.id && !dash) playDash(feed);
+        },
+        (err) => fail(err.message + '.'),
+      );
     } else {
       // Direct files, and HLS on browsers that play it natively (Safari).
       video.src = feed.playUrl;
@@ -230,11 +317,18 @@
     if (state.current && overlay.hidden) nowState.className = 'dot loading';
   });
   video.addEventListener('error', () => {
-    if (!hls && state.current && video.error) fail('Lecture impossible.');
+    if (!hls && !dash && state.current && video.error) fail('Lecture impossible.');
   });
 
   qualitySelect.addEventListener('change', () => {
-    if (hls) hls.currentLevel = Number(qualitySelect.value);
+    if (hls) {
+      hls.currentLevel = Number(qualitySelect.value);
+    } else if (dash) {
+      const auto = qualitySelect.value === '-1';
+      dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: auto } } } });
+      if (!auto) dash.setRepresentationForTypeById('video', qualitySelect.value, true);
+      showDashAutoLevel(dash.getCurrentRepresentationForType('video'));
+    }
   });
 
   reloadBtn.addEventListener('click', () => {

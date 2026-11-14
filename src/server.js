@@ -6,6 +6,7 @@ import http from 'node:http';
 import { dirname, extname, join, normalize } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { dashProxyPath, isManifest, rewriteManifest } from './dash.js';
 import { isPlaylist, rewritePlaylist } from './hls.js';
 import { closeBrowser } from './scanner.js';
 import * as store from './store.js';
@@ -25,7 +26,6 @@ const MIME = {
 
 const STATIC_ALIASES = {
   '/': join(PUBLIC_DIR, 'index.html'),
-  '/vendor/hls.min.js': join(ROOT, 'node_modules', 'hls.js', 'dist', 'hls.min.js'),
 };
 
 function sendJson(res, status, body) {
@@ -88,7 +88,34 @@ async function serveStatic(pathname, res) {
 
 const PASSTHROUGH = ['content-type', 'content-range', 'accept-ranges', 'last-modified', 'etag'];
 
-async function handleProxy(req, res, feedId, target) {
+// Buffers the rest of a text body whose first chunk has already been read.
+async function readRemaining(reader, head, limit = 8 * 1024 * 1024) {
+  const chunks = [head];
+  let size = head.length;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) throw new Error('Manifeste trop volumineux');
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function sendText(res, type, text) {
+  const data = Buffer.from(text, 'utf8');
+  res.writeHead(200, { 'content-type': type, 'content-length': data.length, 'cache-control': 'no-store' });
+  res.end(data);
+}
+
+/**
+ * Relays one request to the stream host.
+ * style 'query': /proxy/<feed>?u=<url>, used for HLS and plain files. URLs
+ *   inside playlists are rewritten to come back here.
+ * style 'path': /dproxy/<feed>/<scheme>/<host>/<path>, used for DASH. The
+ *   path mirrors the original URL so that relative URLs keep working.
+ */
+async function handleProxy(req, res, feedId, target, style) {
   const feed = store.getFeed(feedId);
   if (!feed) return sendJson(res, 404, { error: 'Flux inconnu (re-scanne la page)' });
   let url;
@@ -104,10 +131,29 @@ async function handleProxy(req, res, feedId, target) {
 
   let upstream;
   try {
-    upstream = await fetchUpstream(url.href, feed, { range: req.headers.range, signal: abort.signal });
+    upstream = await fetchUpstream(url.href, feed, {
+      range: req.headers.range,
+      signal: abort.signal,
+      // In path style the player must see redirects itself, so that it
+      // resolves relative URLs against the final address.
+      redirect: style === 'path' ? 'manual' : 'follow',
+    });
   } catch (err) {
     if (abort.signal.aborted) return;
     return sendJson(res, 502, { error: `Source injoignable : ${err.cause?.code || err.message}` });
+  }
+
+  if (style === 'path' && upstream.status >= 300 && upstream.status < 400) {
+    await upstream.body?.cancel().catch(() => {});
+    let location;
+    try {
+      location = new URL(upstream.headers.get('location'), url.href);
+      if (!/^https?:$/.test(location.protocol)) throw new Error();
+    } catch {
+      return sendJson(res, 502, { error: 'Redirection invalide' });
+    }
+    res.writeHead(302, { location: dashProxyPath(feed.id, location.href), 'cache-control': 'no-store' });
+    return res.end();
   }
 
   const headers = { 'cache-control': 'no-store' };
@@ -137,35 +183,24 @@ async function handleProxy(req, res, feedId, target) {
   }
   const head = first.value ? Buffer.from(first.value) : Buffer.alloc(0);
 
-  if (upstream.ok && isPlaylist(head.subarray(0, 64).toString('utf8'))) {
-    const chunks = [head];
-    let size = head.length;
+  const start = head.subarray(0, 2048).toString('utf8');
+  const rewrite =
+    style === 'query' && isPlaylist(start)
+      ? (text) => ['application/vnd.apple.mpegurl', rewritePlaylist(text, upstream.url || url.href, (abs) => `/proxy/${feed.id}?u=${encodeURIComponent(abs)}`)]
+      : style === 'path' && isManifest(start)
+        ? (text) => ['application/dash+xml', rewriteManifest(text, url.href, (abs) => dashProxyPath(feed.id, abs))]
+        : null;
+
+  if (upstream.ok && rewrite) {
+    let text;
     try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.byteLength;
-        if (size > 8 * 1024 * 1024) throw new Error('Playlist trop volumineuse');
-        chunks.push(Buffer.from(value));
-      }
+      text = await readRemaining(reader, head);
     } catch (err) {
       await reader.cancel().catch(() => {});
       if (abort.signal.aborted) return;
       return sendJson(res, 502, { error: err.message });
     }
-    const base = upstream.url || url.href;
-    const body = rewritePlaylist(
-      Buffer.concat(chunks).toString('utf8'),
-      base,
-      (abs) => `/proxy/${feed.id}?u=${encodeURIComponent(abs)}`,
-    );
-    const data = Buffer.from(body, 'utf8');
-    res.writeHead(200, {
-      'content-type': 'application/vnd.apple.mpegurl',
-      'content-length': data.length,
-      'cache-control': 'no-store',
-    });
-    return res.end(data);
+    return sendText(res, ...rewrite(text));
   }
 
   res.writeHead(upstream.status, headers);
@@ -231,9 +266,13 @@ const server = http.createServer(async (req, res) => {
     if (pathname.startsWith('/api/')) return await handleApi(req, res, pathname);
 
     const proxy = /^\/proxy\/([a-f0-9]+)$/.exec(pathname);
-    if (proxy) {
+    // Matched on the raw request so the mirrored path reaches the host as sent.
+    const mirrored = /^\/dproxy\/([a-f0-9]+)\/(https?)\/([^/?#]+)(\/[^#]*)?$/.exec(req.url);
+    if (proxy || mirrored) {
       if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'Méthode refusée' });
-      return await handleProxy(req, res, proxy[1], url.searchParams.get('u') || '');
+      if (proxy) return await handleProxy(req, res, proxy[1], url.searchParams.get('u') || '', 'query');
+      const [, feedId, scheme, host, rest = '/'] = mirrored;
+      return await handleProxy(req, res, feedId, `${scheme}://${host}${rest}`, 'path');
     }
 
     if (req.method === 'GET' && (await serveStatic(pathname, res))) return;

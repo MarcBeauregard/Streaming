@@ -61,7 +61,7 @@ Puis ouvre <http://localhost:4173>.
 | Flux expiré ou figé | Flèche ↻ de la page : elle est analysée à nouveau et la lecture reprend sur le nouveau flux |
 | Page qui liste plusieurs liens | Ouvre **Autres liens sur cette page** et clique **Analyser** sur ceux qui t'intéressent |
 
-Tu peux aussi coller directement une adresse `.m3u8`.
+Tu peux aussi coller directement une adresse `.m3u8` (HLS) ou `.mpd` (DASH).
 
 La liste des pages est gardée d'une session à l'autre. Les flux, eux, sont retrouvés à chaque analyse, car leurs adresses expirent.
 
@@ -69,13 +69,12 @@ La liste des pages est gardée d'une session à l'autre. Les flux, eux, sont ret
 
 - **Détection** (`src/scanner.js`) : la page est ouverte dans un Chrome sans fenêtre. L'app ferme les pop-ups, bloque les redirections publicitaires, clique sur le lecteur jusqu'à ce qu'il démarre, et note chaque flux demandé par la page (HLS, DASH, fichiers vidéo), y compris dans les iframes. Elle fouille aussi le code de la page pour les adresses de playlist qui n'ont pas encore été chargées.
 - **Vérification** (`src/store.js`) : chaque flux est testé depuis l'app. Les qualités sont lues dans la playlist, les doublons sont retirés.
-- **Lecture** (`src/server.js`) : le lecteur passe par un relais local qui renvoie à l'hébergeur les mêmes en-têtes que la page d'origine (Referer, Origin, cookies). Sans ça, la plupart des hébergeurs refusent la connexion.
+- **Lecture** (`src/server.js`) : les flux HLS sont joués avec hls.js, les flux DASH avec dash.js, les fichiers vidéo directement. Dans tous les cas, le lecteur passe par un relais local qui renvoie à l'hébergeur les mêmes en-têtes que la page d'origine (Referer, Origin, cookies). Sans ça, la plupart des hébergeurs refusent la connexion.
 - **Fenêtre** (`desktop/main.js`) : l'app de bureau démarre ce même serveur sur un port privé et l'affiche dans sa propre fenêtre.
 
 ## Limites connues
 
-- **Flux protégés par DRM** (Widevine, FairPlay) : illisibles, et l'app n'essaie pas de les contourner.
-- **Flux DASH** (`.mpd`) : détectés et listés, mais pas encore lisibles dans le lecteur.
+- **Flux protégés par DRM** (Widevine, PlayReady, FairPlay) : ils sont listés comme « trouvé, mais illisible : flux protégé par DRM », et l'app n'essaie pas de les contourner.
 - **Pages derrière un captcha ou une vérification anti-robot** : l'analyse peut ne rien trouver. Lance l'app depuis un terminal avec `HEADLESS=0` pour voir la fenêtre de Chrome et passer la vérification à la main.
 - **Flux liés à une adresse IP ou à une session** : ils apparaissent comme « trouvé, mais illisible ».
 
@@ -98,6 +97,6 @@ La liste des pages est gardée d'une session à l'autre. Les flux, eux, sont ret
 npm test
 ```
 
-Le premier script fabrique une petite vidéo de test avec `ffmpeg`. Les tests lancent ensuite un faux site de streaming (pub en surimpression, pop-up, lecteur en iframe, hébergeur qui exige le bon Referer) et vérifient que l'app y retrouve le flux.
+Le premier script fabrique deux petits flux de test (HLS et DASH) avec `ffmpeg`. Les tests lancent ensuite un faux site de streaming (pub en surimpression, pop-up, lecteur en iframe, hébergeur qui exige le bon Referer) et vérifient que l'app y retrouve le flux.
 
 N'utilise l'app qu'avec des flux que tu as le droit de regarder.

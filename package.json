@@ -1,7 +1,7 @@
 {
   "name": "feedswitch",
   "productName": "FeedSwitch",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Colle le lien d'une page de streaming, l'app trouve les flux vidéo et permet de passer de l'un à l'autre.",
   "author": "FeedSwitch",
@@ -11,19 +11,21 @@
     "node": ">=20"
   },
   "scripts": {
+    "postinstall": "node scripts/vendor.js",
     "start": "electron .",
     "web": "node src/cli.js",
-    "test": "node --test test/hls.test.js test/scan.test.js",
+    "test": "node --test test/hls.test.js test/dash.test.js test/scan.test.js test/proxy.test.js",
     "pack": "electron-builder --dir --publish never",
     "dist": "electron-builder --publish never"
   },
   "dependencies": {
-    "hls.js": "1.7.4",
     "playwright-core": "1.63.0"
   },
   "devDependencies": {
+    "dashjs": "5.3.0",
     "electron": "45.3.2",
-    "electron-builder": "26.18.0"
+    "electron-builder": "26.18.0",
+    "hls.js": "1.7.4"
   },
   "build": {
     "appId": "app.feedswitch.desktop",
@@ -35,14 +37,7 @@
     "files": [
       "src/**",
       "public/**",
-      "desktop/**",
-      "!node_modules/hls.js/src",
-      "!node_modules/hls.js/dist/*.map",
-      "!node_modules/hls.js/dist/*.mjs",
-      "!node_modules/hls.js/dist/hls.js",
-      "!node_modules/hls.js/dist/hls.light*",
-      "!node_modules/hls.js/dist/hls-demo*",
-      "!node_modules/hls.js/dist/hls.worker.js"
+      "desktop/**"
     ],
     "asarUnpack": [
       "node_modules/playwright-core/**"

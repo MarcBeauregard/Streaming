@@ -14,6 +14,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MEDIA = join(HERE, 'media');
 const HLS_JS = join(HERE, '..', '..', 'node_modules', 'hls.js', 'dist', 'hls.min.js');
+const DASH_JS = join(HERE, '..', '..', 'node_modules', 'dashjs', 'dist', 'modern', 'umd', 'dash.all.min.js');
+
+const MEDIA_TYPES = {
+  '.m3u8': 'text/plain', // deliberately unhelpful, as seen in the wild
+  '.ts': 'video/mp2t',
+  '.mpd': 'application/dash+xml',
+  '.m4s': 'video/iso.segment',
+};
 
 function listen(handler, port = 0) {
   return new Promise((resolve) => {
@@ -38,22 +46,26 @@ export async function startFixture({ sitePort = 0, embedPort = 0, cdnPort = 0 } 
   const cdn = await listen((req, res) => {
     const url = new URL(req.url, 'http://x');
     const referer = req.headers.referer || '';
-    const match = /^\/(live|live2)\/(.+)$/.exec(url.pathname);
+    if (url.pathname === '/moved/manifest.mpd' && referer.startsWith(embedOrigin)) {
+      // The address the player is given only redirects to the real manifest.
+      res.writeHead(302, { location: '/dash/manifest.mpd', 'access-control-allow-origin': embedOrigin });
+      return res.end();
+    }
+    const match = /^\/(live|live2|dash)\/(.+)$/.exec(url.pathname);
     const tokenOk = match?.[1] !== 'live2' || !url.pathname.endsWith('master.m3u8') || url.searchParams.get('token') === 'abc';
     if (!match || !referer.startsWith(embedOrigin) || !tokenOk) {
       stats.cdnRefused++;
       res.writeHead(403, { 'content-type': 'text/plain' });
       return res.end('forbidden');
     }
-    const file = normalize(join(MEDIA, match[2]));
+    const file = normalize(join(MEDIA, match[1] === 'dash' ? 'dash' : '', match[2]));
     if (!file.startsWith(MEDIA) || !existsSync(file)) {
       res.writeHead(404);
       return res.end();
     }
     stats.cdnAllowed++;
     res.writeHead(200, {
-      // Deliberately unhelpful content type, as seen in the wild.
-      'content-type': extname(file) === '.m3u8' ? 'text/plain' : 'video/mp2t',
+      'content-type': MEDIA_TYPES[extname(file)] || 'application/octet-stream',
       'access-control-allow-origin': embedOrigin,
     });
     createReadStream(file).pipe(res);
@@ -65,6 +77,26 @@ export async function startFixture({ sitePort = 0, embedPort = 0, cdnPort = 0 } 
     if (url.pathname === '/hls.min.js') {
       res.writeHead(200, { 'content-type': 'text/javascript' });
       return createReadStream(HLS_JS).pipe(res);
+    }
+    if (url.pathname === '/dash.min.js') {
+      res.writeHead(200, { 'content-type': 'text/javascript' });
+      return createReadStream(DASH_JS).pipe(res);
+    }
+    if (url.pathname === '/embed/4') {
+      // A DASH player, started by a real click.
+      const encoded = Buffer.from(`${cdnOrigin}/moved/manifest.mpd`).toString('base64');
+      return html(res, `
+        <style>html,body{margin:0;height:100%;background:#111}video{width:100%;height:100%}
+        #go{position:absolute;inset:0;margin:auto;width:120px;height:120px;border-radius:50%;font-size:40px}</style>
+        <video id="v" muted></video><button id="go">▶</button>
+        <script src="/dash.min.js"></script>
+        <script>
+          document.getElementById('go').addEventListener('click', function (event) {
+            if (!event.isTrusted) return;
+            this.remove();
+            dashjs.MediaPlayer().create().initialize(document.getElementById('v'), atob('${encoded}'), true);
+          });
+        </script>`);
     }
     if (url.pathname === '/embed/1') {
       // The stream URL is assembled at click time, so it is nowhere in the page text.
@@ -114,7 +146,7 @@ export async function startFixture({ sitePort = 0, embedPort = 0, cdnPort = 0 } 
       return html(res, `<title>Match test, lien ${link}</title>
         <body style="background:#222;color:#eee;font-family:sans-serif">
         <h1>Match test</h1>${player}
-        <p><a href="/match?link=2">Lien 2 HD</a> · <a href="/match?link=3">Server 3</a> · <a href="/a-propos">À propos</a></p>`);
+        <p><a href="/match?link=2">Lien 2 HD</a> · <a href="/match?link=3">Server 3</a> · <a href="/match?link=4">Lien 4 DASH</a> · <a href="/a-propos">À propos</a></p>`);
     }
     res.writeHead(404);
     res.end();

@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dashProxyPath, isManifest, parseManifest } from './dash.js';
 import { childUrls, isLive, isMaster, isPlaylist, parseMaster, variantLabel } from './hls.js';
 import { scanPage } from './scanner.js';
 import { DEFAULT_UA, fetchUpstream, readText } from './upstream.js';
@@ -84,13 +85,28 @@ async function inspectHls(candidate) {
       }
     }
     return {
+      key: streamKey(base),
       master: true,
       children: childUrls(text, base),
       live,
       qualities: variants.map((v) => ({ label: variantLabel(v), height: v.height, bandwidth: v.bandwidth })),
     };
   }
-  return { master: false, children: [], live: isLive(text), qualities: [] };
+  return { key: streamKey(base), master: false, children: [], live: isLive(text), qualities: [] };
+}
+
+async function inspectDash(candidate) {
+  const res = await fetchUpstream(candidate.url, candidate);
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => {});
+    throw new Error(`HTTP ${res.status}`);
+  }
+  const text = await readText(res);
+  if (!isManifest(text)) throw new Error('La réponse n’est pas un manifeste DASH');
+  const { live, drm, qualities } = parseManifest(text);
+  if (drm) throw new Error('flux protégé par DRM');
+  // Two addresses that redirect to the same manifest are the same feed.
+  return { key: streamKey(res.url || candidate.url), live, qualities };
 }
 
 async function inspectFile(candidate) {
@@ -114,14 +130,14 @@ async function toFeed(candidate) {
     qualities: [],
     live: null,
     size: candidate.size || null,
-    playable: candidate.kind !== 'dash',
+    playable: true,
     status: 'ok',
     error: null,
   };
   try {
     if (candidate.kind === 'hls') Object.assign(feed, await inspectHls(feed));
-    else if (candidate.kind === 'file') Object.assign(feed, await inspectFile(feed));
-    else feed.error = 'Flux DASH : lecture pas encore prise en charge';
+    else if (candidate.kind === 'dash') Object.assign(feed, await inspectDash(feed));
+    else Object.assign(feed, await inspectFile(feed));
   } catch (err) {
     feed.status = 'error';
     feed.playable = false;
@@ -133,6 +149,7 @@ async function toFeed(candidate) {
 function rank(feed) {
   if (feed.status !== 'ok' || !feed.playable) return 9;
   if (feed.kind === 'hls') return feed.master ? 0 : 1;
+  if (feed.kind === 'dash') return 0;
   return 2;
 }
 
@@ -144,9 +161,16 @@ export async function buildFeeds(candidates) {
   const children = new Set();
   for (const f of inspected) for (const c of f.children) children.add(c).add(streamKey(c));
 
+  // Hosts that serve a working manifest: a video file seen on the same host
+  // is one of its segments, not a feed of its own.
+  const manifestHosts = new Set(
+    inspected.filter((f) => f.kind !== 'file' && f.status === 'ok').map((f) => f.host),
+  );
+
   const seen = new Set();
   const out = [];
   for (const f of inspected) {
+    if (f.kind === 'file' && manifestHosts.has(f.host)) continue;
     // A URL that was only spotted in page text and does not answer is a false lead.
     if (f.via === 'text' && f.status === 'error') continue;
     if (!f.master && (children.has(f.url) || children.has(f.key))) continue;
@@ -180,7 +204,9 @@ export function getFeed(id) {
 
 function publicFeed(feed) {
   const { headers, children, ...rest } = feed;
-  return { ...rest, playUrl: `/proxy/${feed.id}?u=${encodeURIComponent(feed.url)}` };
+  const playUrl =
+    feed.kind === 'dash' ? dashProxyPath(feed.id, feed.url) : `/proxy/${feed.id}?u=${encodeURIComponent(feed.url)}`;
+  return { ...rest, playUrl };
 }
 
 export function listSources() {
@@ -260,12 +286,16 @@ function pump() {
   }
 }
 
-function isDirectStream(url) {
+// 'hls' or 'dash' when the address is itself a manifest, otherwise null.
+function directStreamKind(url) {
   try {
-    return /\.m3u8?$/i.test(new URL(url).pathname);
+    const path = new URL(url).pathname;
+    if (/\.m3u8?$/i.test(path)) return 'hls';
+    if (/\.mpd$/i.test(path)) return 'dash';
   } catch {
-    return false;
+    // Not a URL: let the page scan report it.
   }
+  return null;
 }
 
 // Turns a browser error into something a person can act on.
@@ -290,12 +320,13 @@ async function scan(source) {
   source.step = 'Préparation…';
   try {
     let result;
-    if (isDirectStream(source.url)) {
-      // The user pasted a playlist URL: nothing to discover.
+    const direct = directStreamKind(source.url);
+    if (direct) {
+      // The user pasted a manifest URL: nothing to discover.
       result = {
         title: '',
         links: [],
-        candidates: [{ url: source.url, kind: 'hls', via: 'network', headers: { 'user-agent': DEFAULT_UA } }],
+        candidates: [{ url: source.url, kind: direct, via: 'network', headers: { 'user-agent': DEFAULT_UA } }],
       };
     } else {
       result = await scanPage(source.url, { onProgress: (step) => (source.step = step) });
