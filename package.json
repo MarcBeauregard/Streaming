@@ -1,18 +1,75 @@
 {
   "name": "feedswitch",
-  "version": "0.1.0",
+  "productName": "FeedSwitch",
+  "version": "0.2.0",
   "private": true,
   "description": "Colle le lien d'une page de streaming, l'app trouve les flux vidéo et permet de passer de l'un à l'autre.",
+  "author": "FeedSwitch",
   "type": "module",
+  "main": "desktop/main.js",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "start": "node src/server.js",
-    "test": "node --test test/hls.test.js test/scan.test.js"
+    "start": "electron .",
+    "web": "node src/cli.js",
+    "test": "node --test test/hls.test.js test/scan.test.js",
+    "pack": "electron-builder --dir --publish never",
+    "dist": "electron-builder --publish never"
   },
   "dependencies": {
     "hls.js": "1.7.4",
     "playwright-core": "1.63.0"
+  },
+  "devDependencies": {
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "app.feedswitch.desktop",
+    "productName": "FeedSwitch",
+    "directories": {
+      "buildResources": "desktop",
+      "output": "dist"
+    },
+    "files": [
+      "src/**",
+      "public/**",
+      "desktop/**",
+      "!node_modules/hls.js/src",
+      "!node_modules/hls.js/dist/*.map",
+      "!node_modules/hls.js/dist/*.mjs",
+      "!node_modules/hls.js/dist/hls.js",
+      "!node_modules/hls.js/dist/hls.light*",
+      "!node_modules/hls.js/dist/hls-demo*",
+      "!node_modules/hls.js/dist/hls.worker.js"
+    ],
+    "asarUnpack": [
+      "node_modules/playwright-core/**"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.video"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "AudioVideo"
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   }
 }

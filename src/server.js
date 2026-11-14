@@ -13,9 +13,7 @@ import { fetchUpstream } from './upstream.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = join(ROOT, 'public');
-const PORT = Number(process.env.PORT) || 4173;
-const HOST = process.env.HOST || '127.0.0.1';
-const LOOPBACK = ['127.0.0.1', 'localhost', '::1'].includes(HOST);
+let loopbackOnly = true;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -51,7 +49,7 @@ async function readJson(req) {
 // another host name (DNS rebinding) or that another website makes the browser
 // send (cross-site requests).
 function isTrusted(req) {
-  if (!LOOPBACK) return true;
+  if (!loopbackOnly) return true;
   const host = (req.headers.host || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
   if (!['127.0.0.1', 'localhost', '::1'].includes(host)) return false;
   const origin = req.headers.origin;
@@ -247,16 +245,26 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-await store.load();
-server.listen(PORT, HOST, () => {
-  const shown = HOST.includes(':') ? `[${HOST}]` : HOST;
-  console.log(`FeedSwitch est prêt : http://${shown === '0.0.0.0' ? 'localhost' : shown}:${PORT}`);
-});
-
-async function shutdown() {
-  server.close();
-  await closeBrowser();
-  process.exit(0);
+/**
+ * Starts the app server. `port: 0` picks any free port.
+ * @returns {Promise<{url: string, port: number, close: () => Promise<void>}>}
+ */
+export async function startServer({ port = 4173, host = '127.0.0.1' } = {}) {
+  loopbackOnly = ['127.0.0.1', 'localhost', '::1'].includes(host);
+  await store.load();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, host, resolve);
+  });
+  const actualPort = server.address().port;
+  const shown = host === '0.0.0.0' || host === '::' ? 'localhost' : host.includes(':') ? `[${host}]` : host;
+  return {
+    port: actualPort,
+    url: `http://${shown}:${actualPort}`,
+    close: async () => {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      await closeBrowser();
+    },
+  };
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);

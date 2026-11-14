@@ -1,0 +1,45 @@
+# Construit les installateurs de FeedSwitch (Windows, macOS, Linux).
+# Lancement à la main depuis l'onglet Actions, ou en poussant une étiquette v*.
+name: Installateurs
+
+on:
+  workflow_dispatch:
+    inputs:
+      plateforme:
+        description: Système pour lequel construire l'installateur
+        type: choice
+        default: toutes
+        options: [toutes, windows, macos, linux]
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  construire:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(
+          inputs.plateforme == 'windows' && '["windows-latest"]' ||
+          inputs.plateforme == 'macos' && '["macos-latest"]' ||
+          inputs.plateforme == 'linux' && '["ubuntu-latest"]' ||
+          '["windows-latest","macos-latest","ubuntu-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FeedSwitch-${{ runner.os }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+          if-no-files-found: error
