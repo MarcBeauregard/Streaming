@@ -35,6 +35,20 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run dist
+      - name: Vérifier que l'app démarre (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          app="dist/mac-arm64/FeedSwitch.app"
+          codesign --verify --deep --strict "$app"
+          "$app/Contents/MacOS/FeedSwitch" > demarrage.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 30); do
+            grep -q "FeedSwitch est prêt" demarrage.log && break
+            sleep 1
+          done
+          kill "$pid" || true
+          cat demarrage.log
+          grep -q "FeedSwitch est prêt" demarrage.log
       - uses: actions/upload-artifact@v4
         with:
           name: FeedSwitch-${{ runner.os }}

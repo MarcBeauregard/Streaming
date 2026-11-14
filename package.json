@@ -1,7 +1,7 @@
 {
   "name": "feedswitch",
   "productName": "FeedSwitch",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Colle le lien d'une page de streaming, l'app trouve les flux vidéo et permet de passer de l'un à l'autre.",
   "author": "FeedSwitch",
@@ -52,7 +52,9 @@
           ]
         }
       ],
-      "category": "public.app-category.video"
+      "category": "public.app-category.video",
+      "identity": "-",
+      "hardenedRuntime": false
     },
     "win": {
       "target": "nsis"

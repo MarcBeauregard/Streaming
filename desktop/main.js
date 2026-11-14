@@ -91,6 +91,7 @@ async function main() {
     const { startServer } = await import('../src/server.js');
     server = await startServer({ port: 0, host: '127.0.0.1' });
     await createWindow();
+    console.log('FeedSwitch est prêt');
   } catch (err) {
     dialog.showErrorBox('FeedSwitch ne peut pas démarrer', String(err?.message || err));
     app.quit();

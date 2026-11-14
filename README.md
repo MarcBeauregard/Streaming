@@ -13,10 +13,22 @@ Les installateurs sont construits par GitHub : onglet **Actions** du dépôt, re
 | Système | Fichier | Premier lancement |
 | --- | --- | --- |
 | Windows | `FeedSwitch-…-win-x64.exe` | Windows affiche « Windows a protégé votre ordinateur » : **Informations complémentaires**, puis **Exécuter quand même** |
-| macOS | `FeedSwitch-…-mac-arm64.dmg` (puce Apple) ou `…-mac-x64.dmg` (Intel) | Clic droit sur l'app, **Ouvrir**, puis confirmer |
+| macOS | `FeedSwitch-…-mac-arm64.dmg` (puce Apple) ou `…-mac-x64.dmg` (Intel) | macOS refuse d'ouvrir l'app la première fois : voir ci-dessous |
 | Linux | `FeedSwitch-…-linux-x86_64.AppImage` | Rendre le fichier exécutable, puis double-clic |
 
 Ces avertissements viennent du fait que l'app n'est pas signée par un éditeur enregistré.
+
+**Sur Mac**, pour savoir quel fichier prendre : menu Pomme, **À propos de ce Mac**. « Puce Apple M… » veut dire `arm64`, « Processeur Intel » veut dire `x64`. Ensuite :
+
+1. Ouvre le `.dmg` et glisse FeedSwitch dans **Applications**.
+2. Lance l'app. macOS affiche qu'il ne peut pas la vérifier : clique **Terminé**.
+3. Ouvre **Réglages Système**, **Confidentialité et sécurité**, descends jusqu'à la mention de FeedSwitch et clique **Ouvrir quand même**.
+
+C'est à faire une seule fois. Si le bouton n'apparaît pas, cette commande dans le Terminal lève le blocage :
+
+```bash
+xattr -dr com.apple.quarantine /Applications/FeedSwitch.app
+```
 
 ### À partir du code
 
